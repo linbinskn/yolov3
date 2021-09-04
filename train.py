@@ -45,7 +45,7 @@ quantizers = {
 logger = logging.getLogger(__name__)
 
 
-def test(model, device, dataloader):
+def Test(model, device, dataloader):
     model.eval().to(device)
     pass
 
