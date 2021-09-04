@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def train(hyp, opt, device, tb_writer=None):
-    if opt.quantizer in quantziers:
+    if opt.quantizer in quantizers:
         configure_list = [{
             'quant_types': ['weight'],
             'quant_bits': 8, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
