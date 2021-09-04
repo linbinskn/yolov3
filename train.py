@@ -234,7 +234,7 @@ def train(hyp, opt, device, tb_writer=None):
             # Anchors
             if not opt.noautoanchor:
                 check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
-            model.half().float()  # pre-reduce anchor precision
+            model.float()  # pre-reduce anchor precision
 
     # DDP mode
     if cuda and rank != -1:
@@ -433,8 +433,8 @@ def train(hyp, opt, device, tb_writer=None):
                 ckpt = {'epoch': epoch,
                         'best_fitness': best_fitness,
                         'training_results': results_file.read_text(),
-                        'model': deepcopy(de_parallel(model)).half(),
-                        'ema': deepcopy(ema.ema).half(),
+                        'model': deepcopy(de_parallel(model)),
+                        'ema': deepcopy(ema.ema),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
                         'wandb_id': wandb_logger.wandb_run.id if wandb_logger.wandb else None}
@@ -485,7 +485,7 @@ def train(hyp, opt, device, tb_writer=None):
                                               imgsz=imgsz_test,
                                               conf_thres=0.001,
                                               iou_thres=0.7,
-                                              model=attempt_load(m, device).half(),
+                                              model=attempt_load(m, device),
                                               single_cls=opt.single_cls,
                                               dataloader=testloader,
                                               save_dir=save_dir,
