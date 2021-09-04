@@ -16,7 +16,6 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.utils.data
 import yaml
-from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -34,11 +33,29 @@ from utils.loss import ComputeLoss
 from utils.plots import plot_images, plot_labels, plot_results, plot_evolution
 from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_distributed_zero_first, de_parallel
 from utils.wandb_logging.wandb_utils import WandbLogger, check_wandb_resume
+from nni.algorithms.compression.pytorch.quantization import ObserverQuantizer, QAT_Quantizer, LsqQuantizer
+
+quantizers = {  
+    "ptq": ObserverQuantizer,
+    "qat": QAT_Quantizer,
+    "lsq": LsqQuantizer
+}
+
 
 logger = logging.getLogger(__name__)
 
 
 def train(hyp, opt, device, tb_writer=None):
+    if opt.quantizer in quantziers:
+        configure_list = [{
+            'quant_types': ['weight'],
+            'quant_bits': 8, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
+            'op_types':['Conv2d', 'Linear']
+        },{
+            'quant_types': ['output'],
+            'quant_bits': 8, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
+            'op_types':['LeakyReLU']
+        }]
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank
@@ -240,13 +257,35 @@ def train(hyp, opt, device, tb_writer=None):
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = amp.GradScaler(enabled=cuda)
     compute_loss = ComputeLoss(model)  # init loss class
     logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
+        if opt.quantizer == "ptq":
+            quantizer = ObserverQuantizer(model.eval(), configure_list, optimizer)
+            print("===============Begin to calibrate data....===============")
+            for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+                imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
+
+                # Multi-scale
+                if opt.multi_scale:
+                    sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                    sf = sz / max(imgs.shape[2:])  # scale factor
+                    if sf != 1:
+                        ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
+                        imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
+
+                # Forward
+                pred = model(imgs)  # forward
+            print("==============finish calibration process===========")
+            quantizer.compress()
+            break
+        if opt.quantizer == "lsq" or opt.quantizer == "qat":
+            Quantizer = quantizers[opt.quantizer]
+            dummy_input = torch.randn(1, 3, 640, 640).to(device)
+            quantizer = Quantizer(model, configure_list, optimizer, dummy_input=dummy_input)
         model.train()
 
         # Update image weights (optional)
@@ -299,21 +338,19 @@ def train(hyp, opt, device, tb_writer=None):
                     imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
-            with amp.autocast(enabled=cuda):
-                pred = model(imgs)  # forward
-                loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
-                if rank != -1:
-                    loss *= opt.world_size  # gradient averaged between devices in DDP mode
-                if opt.quad:
-                    loss *= 4.
+            pred = model(imgs)  # forward
+            loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
+            if rank != -1:
+                loss *= opt.world_size  # gradient averaged between devices in DDP mode
+            if opt.quad:
+                loss *= 4.
 
             # Backward
-            scaler.scale(loss).backward()
+            loss.backward()
 
             # Optimize
             if ni % accumulate == 0:
-                scaler.step(optimizer)  # optimizer.step
-                scaler.update()
+                optimizer.step()
                 optimizer.zero_grad()
                 if ema:
                     ema.update(model)
@@ -409,6 +446,23 @@ def train(hyp, opt, device, tb_writer=None):
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training
+
+    final_epoch = epoch + 1 == epochs
+    wandb_logger.current_epoch = epoch + 1
+    results, maps, times = test.test(data_dict,
+                                        batch_size=batch_size * 2,
+                                        imgsz=imgsz_test,
+                                        model=ema.ema,
+                                        single_cls=opt.single_cls,
+                                        dataloader=testloader,
+                                        save_dir=save_dir,
+                                        save_json=is_coco and final_epoch,
+                                        verbose=nc < 50 and final_epoch,
+                                        plots=plots and final_epoch,
+                                        wandb_logger=wandb_logger,
+                                        compute_loss=compute_loss,
+                                        is_coco=is_coco)
+
     if rank in [-1, 0]:
         logger.info(f'{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.\n')
         if plots:
@@ -485,6 +539,7 @@ if __name__ == '__main__':
     parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval for W&B')
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
+    parser.add_argument('--quantizer', type=str, default="none", help='choose quantizer to quantize whole model')
     opt = parser.parse_args()
 
     # Set DDP variables
