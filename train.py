@@ -272,6 +272,9 @@ def train(hyp, opt, device, tb_writer=None):
             pbar = tqdm(pbar, total=nb)  # progress bar
             print("===============Begin to calibrate data....===============")
             for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+                # only calibrate 320 imgs to save time
+                if i > 320:
+                    break
                 imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
                 # Multi-scale
