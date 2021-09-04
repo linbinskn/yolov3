@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 def test(model, device, dataloader):
+    model.eval().to(device)
     pass
 
 def train(hyp, opt, device, tb_writer=None):
@@ -293,6 +294,7 @@ def train(hyp, opt, device, tb_writer=None):
         if opt.quantizer == "lsq" or opt.quantizer == "qat":
             Quantizer = quantizers[opt.quantizer]
             dummy_input = torch.randn(1, 3, 640, 640).to(device)
+            model(dummy_input)
             quantizer = Quantizer(model, configure_list, optimizer, dummy_input=dummy_input)
         model.train()
 
