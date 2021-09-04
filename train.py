@@ -45,6 +45,9 @@ quantizers = {
 logger = logging.getLogger(__name__)
 
 
+def test(model, device, dataloader):
+    pass
+
 def train(hyp, opt, device, tb_writer=None):
     if opt.quantizer in quantizers:
         configure_list = [{
@@ -265,6 +268,8 @@ def train(hyp, opt, device, tb_writer=None):
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         if opt.quantizer == "ptq":
             quantizer = ObserverQuantizer(model.eval(), configure_list, optimizer)
+            pbar = enumerate(dataloader)
+            pbar = tqdm(pbar, total=nb)  # progress bar
             print("===============Begin to calibrate data....===============")
             for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
                 imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
