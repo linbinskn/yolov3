@@ -296,7 +296,9 @@ def train(hyp, opt, device, tb_writer=None):
             dummy_input = torch.randn(1, 3, 640, 640).to(device)
             model.eval()
             model(dummy_input)
+            print("Define qat or lsq quantizer")
             quantizer = Quantizer(model, configure_list, optimizer, dummy_input=dummy_input)
+            print("finish defining qat or lsq quantizer")
         model.train()
 
         # Update image weights (optional)
