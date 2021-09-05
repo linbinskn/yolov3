@@ -370,6 +370,7 @@ def train(hyp, opt, device, tb_writer=None):
                 optimizer.step()
                 optimizer.zero_grad()
                 if ema:
+                    model.to(device)
                     ema.update(model)
 
             # Print
