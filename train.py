@@ -168,6 +168,7 @@ def train(hyp, opt, device, tb_writer=None):
     if pretrained:
         # Optimizer
         if ckpt['optimizer'] is not None:
+            print("=======optimizer is reloaded==========")
             optimizer.load_state_dict(ckpt['optimizer'])
             best_fitness = ckpt['best_fitness']
 
