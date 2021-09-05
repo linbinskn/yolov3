@@ -172,10 +172,12 @@ def train(hyp, opt, device, tb_writer=None):
             optimizer.load_state_dict(ckpt['optimizer'])
             best_fitness = ckpt['best_fitness']
 
+        """
         # EMA
         if ema and ckpt.get('ema'):
             ema.ema.load_state_dict(ckpt['ema'].float().state_dict())
             ema.updates = ckpt['updates']
+        """
 
         # Results
         if ckpt.get('training_results') is not None:
@@ -295,6 +297,12 @@ def train(hyp, opt, device, tb_writer=None):
             print("Define qat or lsq quantizer")
             quantizer = Quantizer(model, configure_list, optimizer, dummy_input)
             print("finish defining qat or lsq quantizer")
+
+            # redefine ema whose model is wrappered
+            ema = ModelEMA(model) if rank in [-1, 0] else None
+            if ema and ckpt.get('ema'):
+                ema.updates = ckpt['updates']
+
         model.train()
 
         # Update image weights (optional)
