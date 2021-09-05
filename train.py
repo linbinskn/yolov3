@@ -299,9 +299,9 @@ def train(hyp, opt, device, tb_writer=None):
             print("finish defining qat or lsq quantizer")
 
             # redefine ema whose model is wrappered
+            updates_copy = ema.updates
             ema = ModelEMA(model) if rank in [-1, 0] else None
-            if ema and ckpt.get('ema'):
-                ema.updates = ckpt['updates']
+            ema.updates = updates_copy
 
         model.train()
 
