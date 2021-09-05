@@ -292,7 +292,7 @@ def train(hyp, opt, device, tb_writer=None):
             model.eval()
             model(dummy_input)
             print("Define qat or lsq quantizer")
-            quantizer = Quantizer(model, configure_list, optimizer, dummy_input=dummy_input)
+            quantizer = Quantizer(model, configure_list, optimizer)
             print("finish defining qat or lsq quantizer")
         model.train()
 
