@@ -266,6 +266,22 @@ def train(hyp, opt, device, tb_writer=None):
                 f'Starting training for {epochs} epochs...')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         if opt.quantizer == "ptq":
+            # inference for once first
+            final_epoch = epoch + 1 == epochs
+            wandb_logger.current_epoch = epoch + 1
+            results, maps, times = test.test(data_dict,
+                                                batch_size=batch_size * 2,
+                                                imgsz=imgsz_test,
+                                                model=ema.ema,
+                                                single_cls=opt.single_cls,
+                                                dataloader=testloader,
+                                                save_dir=save_dir,
+                                                save_json=is_coco and final_epoch,
+                                                verbose=nc < 50 and final_epoch,
+                                                wandb_logger=wandb_logger,
+                                                compute_loss=compute_loss,
+                                                is_coco=is_coco)
+
             quantizer = ObserverQuantizer(model.eval(), configure_list, optimizer)
             pbar = enumerate(dataloader)
             pbar = tqdm(pbar, total=nb)  # progress bar
@@ -468,7 +484,7 @@ def train(hyp, opt, device, tb_writer=None):
                                         compute_loss=compute_loss,
                                         is_coco=is_coco)
 
-    if rank in [-1, 0]:
+    if rank in [-1, 0] and opt.quantizer != "ptq":
         logger.info(f'{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.\n')
 
         if not opt.evolve:
