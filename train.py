@@ -78,7 +78,6 @@ def train(hyp, opt, device, tb_writer=None):
         yaml.safe_dump(vars(opt), f, sort_keys=False)
 
     # Configure
-    plots = not opt.evolve  # create plots
     cuda = device.type != 'cpu'
     init_seeds(2 + rank)
     with open(opt.data) as f:
@@ -227,10 +226,6 @@ def train(hyp, opt, device, tb_writer=None):
             c = torch.tensor(labels[:, 0])  # classes
             # cf = torch.bincount(c.long(), minlength=nc) + 1.  # frequency
             # model._initialize_biases(cf.to(device))
-            if plots:
-                plot_labels(labels, names, save_dir, loggers)
-                if tb_writer:
-                    tb_writer.add_histogram('classes', c, 0)
 
             # Anchors
             if not opt.noautoanchor:
@@ -376,17 +371,6 @@ def train(hyp, opt, device, tb_writer=None):
                     '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
                 pbar.set_description(s)
 
-                # Plot
-                if plots and ni < 3:
-                    f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    Thread(target=plot_images, args=(imgs, targets, paths, f), daemon=True).start()
-                    if tb_writer:
-                        tb_writer.add_graph(torch.jit.trace(de_parallel(model), imgs, strict=False), [])  # model graph
-                        # tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
-                elif plots and ni == 10 and wandb_logger.wandb:
-                    wandb_logger.log({"Mosaics": [wandb_logger.wandb.Image(str(x), caption=x.name) for x in
-                                                  save_dir.glob('train*.jpg') if x.exists()]})
-
             # end batch ------------------------------------------------------------------------------------------------
         # end epoch ----------------------------------------------------------------------------------------------------
 
@@ -410,7 +394,6 @@ def train(hyp, opt, device, tb_writer=None):
                                                  save_dir=save_dir,
                                                  save_json=is_coco and final_epoch,
                                                  verbose=nc < 50 and final_epoch,
-                                                 plots=plots and final_epoch,
                                                  wandb_logger=wandb_logger,
                                                  compute_loss=compute_loss,
                                                  is_coco=is_coco)
@@ -471,19 +454,12 @@ def train(hyp, opt, device, tb_writer=None):
                                         save_dir=save_dir,
                                         save_json=is_coco and final_epoch,
                                         verbose=nc < 50 and final_epoch,
-                                        plots=plots and final_epoch,
                                         wandb_logger=wandb_logger,
                                         compute_loss=compute_loss,
                                         is_coco=is_coco)
 
     if rank in [-1, 0]:
         logger.info(f'{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.\n')
-        if plots:
-            plot_results(save_dir=save_dir)  # save as results.png
-            if wandb_logger.wandb:
-                files = ['results.png', 'confusion_matrix.png', *[f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R')]]
-                wandb_logger.log({"Results": [wandb_logger.wandb.Image(str(save_dir / f), caption=f) for f in files
-                                              if (save_dir / f).exists()]})
 
         if not opt.evolve:
             if is_coco:  # COCO dataset
