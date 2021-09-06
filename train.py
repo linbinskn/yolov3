@@ -484,6 +484,7 @@ def train(hyp, opt, device, tb_writer=None):
                                         compute_loss=compute_loss,
                                         is_coco=is_coco)
 
+    """
     if rank in [-1, 0] and opt.quantizer != "ptq":
         logger.info(f'{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.\n')
 
@@ -514,6 +515,8 @@ def train(hyp, opt, device, tb_writer=None):
         wandb_logger.finish_run()
     else:
         dist.destroy_process_group()
+    """
+
     torch.cuda.empty_cache()
     return results
 
