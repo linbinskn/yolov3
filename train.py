@@ -44,6 +44,20 @@ quantizers = {
 
 logger = logging.getLogger(__name__)
 
+def generate_quantize_config(model, ignore_start_end_layer=False):
+    """
+    Generate quantization config for layers whose type is supported. If ignore_start_end_layer is set true,
+    the first and last layer will not be quantized.
+    """
+    ignore_layer_names = ["model.0.conv", "model.0.act"] if ignore_start_end_layer else []
+    configure_list = []
+    for name, module in model.named_modules():
+        if type(module).__name__ not in ['Conv2d', 'LeakyReLU'] or name in ignore_layer_names:
+            continue
+        module_config = {'quant_bits': 8, 'op_names': [name]}
+        module_config['quant_types'] = ['weight'] if type(module).__name__ == "Conv2d" else ['output']
+        configure_list.append(module_config)
+    return configure_list
 
 def Test(model, device, dataloader):
     model.eval().to(device)
@@ -281,6 +295,8 @@ def train(hyp, opt, device, tb_writer=None):
                                                 wandb_logger=wandb_logger,
                                                 compute_loss=compute_loss,
                                                 is_coco=is_coco)
+
+            configure_list = generate_quantize_config(model, True)
 
             quantizer = ObserverQuantizer(model.eval(), configure_list, optimizer)
             pbar = enumerate(dataloader)
