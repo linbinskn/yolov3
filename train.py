@@ -278,6 +278,21 @@ def train(hyp, opt, device, tb_writer=None):
                 f'Using {dataloader.num_workers} dataloader workers\n'
                 f'Logging results to {save_dir}\n'
                 f'Starting training for {epochs} epochs...')
+
+    if opt.quantizer == "lsq" or opt.quantizer == "qat":
+        Quantizer = quantizers[opt.quantizer]
+        dummy_input = torch.randn(1, 3, 640, 640).to(device)
+        model.eval()
+        model(dummy_input)
+        print("Define qat or lsq quantizer")
+        quantizer = Quantizer(model, configure_list, optimizer, dummy_input)
+        print("finish defining qat or lsq quantizer")
+
+        # redefine ema whose model is wrappered
+        updates_copy = ema.updates
+        ema = ModelEMA(model) if rank in [-1, 0] else None
+        ema.updates = updates_copy
+
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         if opt.quantizer == "ptq":
             # inference for once first
@@ -321,19 +336,6 @@ def train(hyp, opt, device, tb_writer=None):
             print("==============finish calibration process===========")
             quantizer.compress()
             break
-        if opt.quantizer == "lsq" or opt.quantizer == "qat":
-            Quantizer = quantizers[opt.quantizer]
-            dummy_input = torch.randn(1, 3, 640, 640).to(device)
-            model.eval()
-            model(dummy_input)
-            print("Define qat or lsq quantizer")
-            quantizer = Quantizer(model, configure_list, optimizer, dummy_input)
-            print("finish defining qat or lsq quantizer")
-
-            # redefine ema whose model is wrappered
-            updates_copy = ema.updates
-            ema = ModelEMA(model) if rank in [-1, 0] else None
-            ema.updates = updates_copy
 
         model.train()
 
