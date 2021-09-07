@@ -53,11 +53,11 @@ def train(hyp, opt, device, tb_writer=None):
     if opt.quantizer in quantizers:
         configure_list = [{
             'quant_types': ['weight'],
-            'quant_bits': 4, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
+            'quant_bits': 8, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
             'op_types':['Conv2d']
         },{
             'quant_types': ['output'],
-            'quant_bits': 4, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
+            'quant_bits': 8, # you can just use `int` here because all `quan_types` share same bits length, see config for `ReLu6` below.
             'op_types':['LeakyReLU']
         }]
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
