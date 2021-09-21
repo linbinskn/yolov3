@@ -342,7 +342,7 @@ def train(hyp, opt, device, tb_writer=None):
             print("==============finish calibration process===========")
             quantizer.compress()
             break
-
+        model.to(device)
         model.train()
 
         # Update image weights (optional)
