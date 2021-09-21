@@ -132,6 +132,7 @@ def train(hyp, opt, device, tb_writer=None):
         check_dataset(data_dict)  # check
     train_path = data_dict['train']
     test_path = data_dict['val']
+    model.to(device)
 
     # Freeze
     freeze = []  # parameter names to freeze (full or partial)
