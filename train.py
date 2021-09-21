@@ -502,6 +502,31 @@ def train(hyp, opt, device, tb_writer=None):
                                         compute_loss=compute_loss,
                                         is_coco=is_coco)
 
+    model_path = "yolov3-tiny.pth"
+    calibration_path = "yolov3-tiny_calibration.pth"
+    calibration_config = quantizer.export_model(model_path, calibration_path)
+    print("calibration_config: ", calibration_config)
+
+    if opt.speedup and opt.quantizer in quantizers:
+        from nni.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
+        model_path = "yolov3.pth"
+        calibration_path = "yolov3_calibration.pth"
+        calibration_config = quantizer.export_model(model_path, calibration_path)
+        input_shape = (opt.batch_size, 3, 640, 640)
+        engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=batch_size)
+        map50, map = test_trt(data_dict,
+                        batch_size=batch_size * 2,
+                        imgsz=imgsz_test,
+                        model=model,
+                        single_cls=opt.single_cls,
+                        dataloader=testloader,
+                        save_dir=save_dir,
+                        save_json=is_coco and final_epoch,
+                        verbose=nc < 50 and final_epoch,
+                        wandb_logger=wandb_logger,
+                        compute_loss=compute_loss,
+                        is_coco=is_coco,
+                        trt_engine=engine)
     """
     if rank in [-1, 0] and opt.quantizer != "ptq":
         logger.info(f'{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.\n')
@@ -576,6 +601,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_period', type=int, default=-1, help='Log model after every "save_period" epoch')
     parser.add_argument('--artifact_alias', type=str, default="latest", help='version of dataset artifact to be used')
     parser.add_argument('--quantizer', type=str, default="none", help='choose quantizer to quantize whole model')
+    parser.add_argument('--speedup', type=bool, default=False, help="set quantization speedup or not")
     opt = parser.parse_args()
 
     # Set DDP variables
