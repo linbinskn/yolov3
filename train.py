@@ -43,6 +43,7 @@ quantizers = {
 
 
 logger = logging.getLogger(__name__)
+map50_list = []
 
 def generate_quantize_config(model, ignore_start_end_layer=False):
     """
@@ -286,6 +287,11 @@ def train(hyp, opt, device, tb_writer=None):
         model(dummy_input)
         print("Define qat or lsq quantizer")
         quantizer = Quantizer(model, configure_list, optimizer, dummy_input)
+        quantizer.compress()
+        ptq_calibration_path = "/data/data0/v-linbin/yolov3/yolov3-tiny_calibration.pth"
+        if os.path.isfile(ptq_calibration_path):
+            calibration_config = torch.load(ptq_calibration_path)
+            quantizer.load_calibration_config(calibration_config)
         print("finish defining qat or lsq quantizer")
 
         # redefine ema whose model is wrappered
@@ -441,7 +447,11 @@ def train(hyp, opt, device, tb_writer=None):
                                                  wandb_logger=wandb_logger,
                                                  compute_loss=compute_loss,
                                                  is_coco=is_coco)
-
+                map50_list.append(results[2])
+                file_name = opt.quantizer+"map50.json"
+                import json
+                with open(file_name, 'w') as f:
+                    json.dump(map50_list, f)
             # Write
             with open(results_file, 'a') as f:
                 f.write(s + '%10.4g' * 7 % results + '\n')  # append metrics, val_loss
