@@ -526,6 +526,8 @@ def train(hyp, opt, device, tb_writer=None):
         calibration_config = quantizer.export_model(model_path, calibration_path)
         input_shape = (opt.batch_size, 3, 640, 640)
         engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=batch_size)
+        engine.compress()
+
         map50, map = test.test_trt(data_dict,
                         batch_size=batch_size * 2,
                         imgsz=imgsz_test,
