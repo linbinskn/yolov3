@@ -514,16 +514,12 @@ def train(hyp, opt, device, tb_writer=None):
                                         compute_loss=compute_loss,
                                         is_coco=is_coco)
 
-    model_path = "yolov3-tiny.pth"
-    calibration_path = "yolov3-tiny_calibration.pth"
-    calibration_config = quantizer.export_model(model_path, calibration_path)
-    print("calibration_config: ", calibration_config)
-
     if opt.speedup and opt.quantizer in quantizers:
         from nni.compression.pytorch.quantization_speedup import ModelSpeedupTensorRT
         model_path = "yolov3.pth"
         calibration_path = "yolov3_calibration.pth"
         calibration_config = quantizer.export_model(model_path, calibration_path)
+        print("calibration_config: ", calibration_config)
         input_shape = (opt.batch_size, 3, 640, 640)
         engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=batch_size)
         engine.compress()
