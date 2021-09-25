@@ -286,6 +286,146 @@ def test(data,
         maps[c] = ap[i]
     return (mp, mr, map50, map, *(loss.cpu() / len(dataloader)).tolist()), maps, t
 
+@torch.no_grad()
+def test_trt(data,
+         weights=None,
+         batch_size=32,
+         imgsz=640,
+         conf_thres=0.001,
+         iou_thres=0.6,  # for NMS
+         save_json=False,
+         single_cls=False,
+         augment=False,
+         verbose=False,
+         model=None,
+         dataloader=None,
+         save_dir=Path(''),  # for saving images
+         save_txt=False,  # for auto-labelling
+         save_hybrid=False,  # for hybrid auto-labelling
+         save_conf=False,  # save auto-label confidences
+         plots=False,
+         wandb_logger=None,
+         compute_loss=None,
+         half_precision=True,
+         is_coco=False,
+         opt=None,
+         trt_engine=None):
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Configure
+    if isinstance(data, str):
+        is_coco = data.endswith('coco.yaml')
+        with open(data) as f:
+            data = yaml.safe_load(f)
+    check_dataset(data)  # check
+    nc = 1 if single_cls else int(data['nc'])  # number of classes
+    iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
+    niou = iouv.numel()
+
+    # Logging
+    log_imgs = 0
+    if wandb_logger and wandb_logger.wandb:
+        log_imgs = min(wandb_logger.log_imgs, 100)
+    # Dataloader
+
+    seen = 0
+    confusion_matrix = ConfusionMatrix(nc=nc)
+    names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
+    coco91class = coco80_to_coco91_class()
+    s = ('%20s' + '%12s' * 6) % ('Class', 'Images', 'Labels', 'P', 'R', 'mAP@.5', 'mAP@.5:.95')
+    p, r, f1, mp, mr, map50, map, t0, t1 = 0., 0., 0., 0., 0., 0., 0., 0., 0.
+    loss = torch.zeros(3, device=device)
+    jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
+    for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+        img = img.to(device, non_blocking=True)
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        targets = targets.to(device)
+        nb, _, height, width = img.shape  # batch size, channels, height, width
+
+        # Run model
+        t = time_synchronized()
+        out, train_out, time = trt_engine.inference(img)  # inference and training outputs
+        t0 += time_synchronized() - t
+
+        # Compute loss
+        if compute_loss:
+            loss += compute_loss([x.float() for x in train_out], targets)[1][:3]  # box, obj, cls
+
+        # Run NMS
+        targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+        lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
+        t = time_synchronized()
+        out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls)
+        t1 += time_synchronized() - t
+
+        # Statistics per image
+        for si, pred in enumerate(out):
+            labels = targets[targets[:, 0] == si, 1:]
+            nl = len(labels)
+            tcls = labels[:, 0].tolist() if nl else []  # target class
+            path = Path(paths[si])
+            seen += 1
+
+            if len(pred) == 0:
+                if nl:
+                    stats.append((torch.zeros(0, niou, dtype=torch.bool), torch.Tensor(), torch.Tensor(), tcls))
+                continue
+
+            # Predictions
+            if single_cls:
+                pred[:, 5] = 0
+            predn = pred.clone()
+            scale_coords(img[si].shape[1:], predn[:, :4], shapes[si][0], shapes[si][1])  # native-space pred
+
+            # Assign all predictions as incorrect
+            correct = torch.zeros(pred.shape[0], niou, dtype=torch.bool, device=device)
+            if nl:
+                detected = []  # target indices
+                tcls_tensor = labels[:, 0]
+
+                # target boxes
+                tbox = xywh2xyxy(labels[:, 1:5])
+                scale_coords(img[si].shape[1:], tbox, shapes[si][0], shapes[si][1])  # native-space labels
+
+                # Per target class
+                for cls in torch.unique(tcls_tensor):
+                    ti = (cls == tcls_tensor).nonzero(as_tuple=False).view(-1)  # target indices
+                    pi = (cls == pred[:, 5]).nonzero(as_tuple=False).view(-1)  # prediction indices
+
+                    # Search for detections
+                    if pi.shape[0]:
+                        # Prediction to target ious
+                        ious, i = box_iou(predn[pi, :4], tbox[ti]).max(1)  # best ious, indices
+
+                        # Append detections
+                        detected_set = set()
+                        for j in (ious > iouv[0]).nonzero(as_tuple=False):
+                            d = ti[i[j]]  # detected target
+                            if d.item() not in detected_set:
+                                detected_set.add(d.item())
+                                detected.append(d)
+                                correct[pi[j]] = ious[j] > iouv  # iou_thres is 1xn
+                                if len(detected) == nl:  # all targets already located in image
+                                    break
+
+            # Append statistics (correct, conf, pcls, tcls)
+            stats.append((correct.cpu(), pred[:, 4].cpu(), pred[:, 5].cpu(), tcls))
+
+    # Compute statistics
+    stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
+    if len(stats) and stats[0].any():
+        p, r, ap, f1, ap_class = ap_per_class(*stats, plot=plots, save_dir=save_dir, names=names)
+        ap50, ap = ap[:, 0], ap.mean(1)  # AP@0.5, AP@0.5:0.95
+        mp, mr, map50, map = p.mean(), r.mean(), ap50.mean(), ap.mean()
+        nt = np.bincount(stats[3].astype(np.int64), minlength=nc)  # number of targets per class
+    else:
+        nt = torch.zeros(1)
+
+    print(f"map50: {map50}, map: {map}")
+
+    return map50, map
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')

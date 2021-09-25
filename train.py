@@ -526,7 +526,7 @@ def train(hyp, opt, device, tb_writer=None):
         calibration_config = quantizer.export_model(model_path, calibration_path)
         input_shape = (opt.batch_size, 3, 640, 640)
         engine = ModelSpeedupTensorRT(model, input_shape, config=calibration_config, batchsize=batch_size)
-        map50, map = test_trt(data_dict,
+        map50, map = test.test_trt(data_dict,
                         batch_size=batch_size * 2,
                         imgsz=imgsz_test,
                         model=model,
@@ -582,7 +582,7 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/coco.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=300)
+    parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch-size', type=int, default=8, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[640, 640], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
